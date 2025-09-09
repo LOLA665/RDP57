@@ -1,0 +1,56 @@
+name: Windows Server 2025 RDP with Max Resources and Tailscale VPN
+
+on:
+  workflow_dispatch:
+
+jobs:
+  setup_rdp:
+    runs-on: windows-2025
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository (optional)
+        uses: actions/checkout@v3
+
+      - name: Connect to Tailscale using Auth Key
+        uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+
+      - name: Enable Remote Desktop and configure firewall
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0
+          Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'
+
+      - name: Generate random password for user "runneradmin"
+        id: gen_pass
+        shell: powershell
+        run: |
+          $chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+          $password = -join ((1..16) | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
+          echo "rdp_password=$password" >> $env:GITHUB_OUTPUT
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          Set-LocalUser -Name "runneradmin" -Password $securePass
+
+      - name: Show system info (CPU cores, Memory, Disk)
+        shell: powershell
+        run: |
+          Write-Host "===== System Info ====="
+          Get-WmiObject Win32_ComputerSystem | Select-Object NumberOfLogicalProcessors, TotalPhysicalMemory
+          Get-PSDrive C | Select-Object Used, Free
+
+      - name: Show Tailscale IP and RDP credentials
+        shell: powershell
+        run: |
+          $tailscaleIp = tailscale ip -4
+          Write-Host "======================================"
+          Write-Host "Tailscale VPN IP for RDP: $tailscaleIp"
+          Write-Host "Username: runneradmin"
+          Write-Host "Password: ${{ steps.gen_pass.outputs.rdp_password }}"
+          Write-Host "======================================"
+
+      - name: Keep session alive for 6 hours
+        shell: powershell
+        run: Start-Sleep -Seconds 21600
+        
